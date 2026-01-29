@@ -2,15 +2,14 @@
 
 > **For agents:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Build a standalone observability library that provides tracing, metrics,
+**Goal:** Build a standalone observability library providing tracing, metrics,
 and structured logging for tool execution across the stack.
 
-**Architecture:** A pure instrumentation layer that wraps execution callbacks
-with OpenTelemetry spans, metrics, and structured logs. Exporters are configured
-by the caller; the library never executes tools or performs network I/O on its
-own.
+**Architecture:** Pure instrumentation layer that wraps execution callbacks with
+OpenTelemetry spans, metrics, and structured logs. Exporters are configured by
+callers. The library never executes tools or performs network I/O on its own.
 
-**Tech Stack:** Go 1.24+, OpenTelemetry SDK, OTLP/Jaeger/Prometheus exporters
+**Tech Stack:** Go 1.24+, OpenTelemetry SDK, OTLP/Jaeger/Prometheus exporters.
 
 **Priority:** P1 (Phase 3 in the plan-of-record)
 
@@ -18,43 +17,114 @@ own.
 
 ## Context and Stack Alignment
 
-toolobserve enables visibility across:
+toolobserve provides consistent telemetry for:
 - `toolrun` execution and chaining
 - `toolruntime` backend execution
-- `metatools-mcp` server pipeline (middleware integration)
+- `metatools-mcp` server middleware
 
 It must remain **protocol-agnostic** and **transport-agnostic**. Observability
-should not leak into business logic; it is injected via middleware/wrappers.
+must not leak into business logic; it is injected via middleware/wrappers.
 
 ---
 
-## Scope
+## Requirements
 
-### In scope
-- Observer configuration and validation
-- Tracing setup with deterministic span naming
-- Metrics counters/histograms for execution
-- Structured logging with tool-scoped fields
-- Middleware wrapper for tool execution
-- Exporter configuration (OTLP, Jaeger, Prometheus, stdout)
-- Unit tests for all exported behavior
-- Minimal docs and examples
+### Functional
 
-### Out of scope
-- Tool execution logic
-- Storage backends for logs/metrics
-- Sampling policies beyond OTel defaults
-- PII redaction beyond simple field control
+1. Configurable tracing, metrics, and logging.
+2. Deterministic span naming and metric naming.
+3. Structured logs with tool-scoped fields.
+4. Middleware wrapper for execution callbacks.
+5. Exporter configuration for OTLP/Jaeger/Prometheus/Stdout.
+
+### Non-functional
+
+- Thread-safe under concurrent use.
+- No global mutable state beyond internal OTel providers.
+- No panics on exporter failure (errors are returned/logged).
+- Context propagation for every API surface.
+- Deterministic output for tests.
 
 ---
 
-## Design Principles
+## API Model (Target)
 
-1. **Pure instrumentation**: no execution or transport code.
-2. **Context-first**: all APIs accept and propagate `context.Context`.
-3. **Deterministic naming**: stable span/metric names across runs.
-4. **Low overhead**: avoid heavy allocations on hot paths.
-5. **Failure isolation**: exporter errors must not crash the caller.
+```go
+// Config drives observer setup.
+type Config struct {
+    ServiceName string
+    Version     string
+    Tracing     TracingConfig
+    Metrics     MetricsConfig
+    Logging     LoggingConfig
+}
+
+type TracingConfig struct {
+    Enabled   bool
+    Exporter  string // otlp|jaeger|stdout|none
+    SamplePct float64
+}
+
+type MetricsConfig struct {
+    Enabled  bool
+    Exporter string // otlp|prometheus|stdout|none
+}
+
+type LoggingConfig struct {
+    Enabled bool
+    Level   string // debug|info|warn|error
+}
+
+// Observer provides tracing/metrics/logging helpers.
+type Observer interface {
+    Tracer() trace.Tracer
+    Meter() metric.Meter
+    Logger() Logger
+}
+
+// ToolMeta is the minimal tool identity.
+type ToolMeta struct {
+    ID        string
+    Namespace string
+    Name      string
+    Version   string
+    Tags      []string
+    Category  string
+}
+
+// Middleware wraps execution with telemetry.
+type Middleware struct { observer Observer }
+
+// ExecuteFunc is a generic execution signature.
+type ExecuteFunc func(ctx context.Context, tool ToolMeta, input any) (any, error)
+```
+
+---
+
+## Telemetry Semantics
+
+### Span Naming
+
+- `tool.exec.<namespace>.<name>`
+- If namespace is empty: `tool.exec.<name>`
+
+### Span Attributes
+
+- `tool.id`, `tool.namespace`, `tool.name`, `tool.version`, `tool.category`
+- `tool.tags` (string list)
+- `tool.error` (bool)
+
+### Metrics
+
+- Counter: `tool.exec.total` (unit: `{call}`)
+- Counter: `tool.exec.errors` (unit: `{error}`)
+- Histogram: `tool.exec.duration_ms` (unit: `ms`)
+
+### Logging Fields
+
+- `tool.id`, `tool.namespace`, `tool.name`, `tool.version`
+- `duration_ms`, `error`
+- Inputs should be **redacted** or hashed by default (no raw inputs)
 
 ---
 
@@ -85,102 +155,146 @@ toolobserve/
 
 ---
 
-## API Shape (Conceptual)
-
-```go
-// Config drives observer setup.
-type Config struct {
-    ServiceName string
-    Version     string
-    Tracing     TracingConfig
-    Metrics     MetricsConfig
-    Logging     LoggingConfig
-}
-
-// Observer provides tracing/metrics/logging helpers.
-type Observer interface {
-    Tracer() trace.Tracer
-    Meter() metric.Meter
-    Logger() Logger
-}
-
-// Middleware wraps tool execution with telemetry.
-type Middleware struct {
-    observer Observer
-}
-```
-
----
-
-## Tasks (TDD)
+## TDD Task Breakdown (Detailed)
 
 ### Task 1 — Config + Observer Core
 
-- Implement `Config` validation (service name, exporter names)
-- Implement `NewObserver` returning initialized tracer/meter/logger
-- Tests: validation failure, observer initialization
+**Files:** `observe.go`, `observe_test.go`
+
+**Tests:**
+- `TestConfigValidate_Valid`
+- `TestConfigValidate_MissingServiceName`
+- `TestConfigValidate_UnknownTracingExporter`
+- `TestConfigValidate_UnknownMetricsExporter`
+- `TestNewObserver_DisabledNoop`
+- `TestNewObserver_ReturnsTracerAndMeter`
+
+**Acceptance:** Config validation rejects unknown exporters and empty service
+name. `NewObserver` returns a no-op implementation when disabled.
+
+**Commit:** `feat(toolobserve): add config validation and observer core`
+
+---
 
 ### Task 2 — Tracing
 
-- Create spans with deterministic naming (`tool.<namespace>.<name>`)
-- Attach tool metadata attributes (`tool.id`, `tool.name`, `tool.namespace`)
-- Tests: span name + attribute presence
+**Files:** `tracer.go`, `tracer_test.go`
+
+**Tests:**
+- `TestTracer_SpanNameDeterministic`
+- `TestTracer_SpanAttributes`
+- `TestTracer_ContextPropagation`
+
+**Acceptance:** Span names and attributes match the semantic contract, and
+span context is propagated.
+
+**Commit:** `feat(toolobserve): add tracing`
+
+---
 
 ### Task 3 — Metrics
 
-- Counters: total executions, error count
-- Histogram: duration (ms)
-- Tests: metric registration and recording
+**Files:** `metrics.go`, `metrics_test.go`
+
+**Tests:**
+- `TestMetrics_CountersIncrement`
+- `TestMetrics_DurationHistogram`
+
+**Acceptance:** Counters and histograms record execution and error events.
+
+**Commit:** `feat(toolobserve): add metrics`
+
+---
 
 ### Task 4 — Logging
 
-- Structured logger with tool-scoped fields
-- Log levels: info, warn, error
-- Tests: logger includes tool metadata
+**Files:** `logger.go`, `logger_test.go`
+
+**Tests:**
+- `TestLogger_IncludesToolFields`
+- `TestLogger_ErrorLevel`
+
+**Acceptance:** Logs include tool context and error information.
+
+**Commit:** `feat(toolobserve): add structured logger`
+
+---
 
 ### Task 5 — Middleware
 
-- Wrap execution function with tracing/metrics/logging
-- Ensure no mutation of input arguments
-- Tests: middleware invokes callbacks and records telemetry
+**Files:** `middleware.go`, `middleware_test.go`
+
+**Tests:**
+- `TestMiddleware_SuccessPath`
+- `TestMiddleware_ErrorPath`
+- `TestMiddleware_DoesNotMutateInput`
+
+**Acceptance:** Middleware wraps execution with tracing/metrics/logging and
+preserves inputs.
+
+**Commit:** `feat(toolobserve): add execution middleware`
+
+---
 
 ### Task 6 — Exporter Setup
 
-- OTLP exporter (grpc/http selectable)
-- Jaeger exporter
-- Prometheus exporter
-- Stdout exporter (dev)
-- Tests: invalid exporter config errors
+**Files:** `exporters/*.go`, `exporters/*_test.go`
+
+**Tests:**
+- `TestExporter_InvalidName`
+- `TestExporter_Stdout`
+- `TestExporter_OtlpConfigValidation`
+- `TestExporter_PrometheusConfigValidation`
+
+**Acceptance:** Exporter configuration errors are returned, not panicked.
+
+**Commit:** `feat(toolobserve): add exporter configuration`
+
+---
 
 ### Task 7 — Docs + Examples
 
-- Update README and docs/index.md with examples
-- Add Mermaid flow diagram to user-journey
-- Add D2 component diagram in ai-tools-stack
+**Files:** `README.md`, `docs/index.md`, `docs/user-journey.md`
+
+**Acceptance:** Quick start examples exist, Mermaid diagram is present, and
+ai-tools-stack includes a D2 diagram.
+
+**Commit:** `docs(toolobserve): finalize documentation`
+
+---
+
+## PR Process
+
+1. Create branch: `feat/toolobserve-<task>`
+2. Implement TDD task in isolation
+3. Run: `go test -race ./...`
+4. Commit with scoped message from task
+5. Open PR against `main`
+6. Merge after CI green
 
 ---
 
 ## Versioning and Propagation
 
-- **Source of truth**: `ai-tools-stack/go.mod`
-- **Version matrix**: `ai-tools-stack/VERSIONS.md` (auto-synced)
-- **Propagation**: `ai-tools-stack/scripts/update-version-matrix.sh --apply`
+- **Source of truth:** `ai-tools-stack/go.mod`
+- **Matrix:** `ai-tools-stack/VERSIONS.md` (auto-synced)
+- **Propagation:** `ai-tools-stack/scripts/update-version-matrix.sh --apply`
 - Tags: `vX.Y.Z` and `toolobserve-vX.Y.Z`
 
 ---
 
 ## Integration with metatools-mcp
 
-- Wire as middleware in the server pipeline after tool provider selection.
-- Span/metric names must match server tool IDs.
-- Configuration must be driven via metatools config layer.
+- Wire middleware after tool provider selection.
+- Span/metric names must match tool IDs emitted by the server.
+- Configuration driven through `metatools-mcp` config layer.
 
 ---
 
 ## Definition of Done
 
-- All TDD tasks complete with tests passing
+- All tasks complete with tests passing
 - `go test -race ./...` succeeds
-- Docs include quick start + diagrams
+- Docs + diagrams updated in ai-tools-stack
 - CI green
 - Version matrix updated after first release

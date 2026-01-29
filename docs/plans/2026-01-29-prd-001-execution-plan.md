@@ -6,24 +6,18 @@ PRD: docs/plans/2026-01-29-prd-001-toolobserve-library.md
 
 ## Overview
 
-Implement the `toolobserve` library as a pure instrumentation layer for tool
-execution. The library provides tracing, metrics, and structured logging with
-OpenTelemetry exporters. No tool execution or transport logic is included.
-
-Stack position:
-
-```
-toolrun/toolruntime --> toolobserve --> exporters
-```
+Implement `toolobserve` as a pure instrumentation library. The library wraps
+execution callbacks with tracing, metrics, and logging and supports multiple
+exporters. No tool execution, transport, or network behavior is included.
 
 ## TDD Methodology
 
 Each task follows strict TDD:
-1. Red — Write failing test
-2. Red verification — Run test, confirm failure
-3. Green — Minimal implementation
-4. Green verification — Run test, confirm pass
-5. Commit — One commit per task
+1. Red — write failing test
+2. Red verification — run test, confirm failure
+3. Green — minimal implementation
+4. Green verification — run test, confirm pass
+5. Commit — one commit per task
 
 ---
 
@@ -46,11 +40,15 @@ Commit:
 ## Task 1 — Config + Observer Core
 
 Tests:
-- Validate config with/without service name
-- NewObserver returns initialized tracer/meter
+- TestConfigValidate_Valid
+- TestConfigValidate_MissingServiceName
+- TestConfigValidate_UnknownTracingExporter
+- TestConfigValidate_UnknownMetricsExporter
+- TestNewObserver_DisabledNoop
+- TestNewObserver_ReturnsTracerAndMeter
 
 Commit:
-- feat(toolobserve): add observer core
+- feat(toolobserve): add config validation and observer core
 
 Commands:
 - go test -v ./... -run TestConfig
@@ -60,8 +58,9 @@ Commands:
 ## Task 2 — Tracing
 
 Tests:
-- Span naming is deterministic
-- Tool metadata attributes attached
+- TestTracer_SpanNameDeterministic
+- TestTracer_SpanAttributes
+- TestTracer_ContextPropagation
 
 Commit:
 - feat(toolobserve): add tracing
@@ -71,8 +70,8 @@ Commit:
 ## Task 3 — Metrics
 
 Tests:
-- Counters increment
-- Histogram records duration
+- TestMetrics_CountersIncrement
+- TestMetrics_DurationHistogram
 
 Commit:
 - feat(toolobserve): add metrics
@@ -82,31 +81,36 @@ Commit:
 ## Task 4 — Logging
 
 Tests:
-- Structured logger includes tool metadata
+- TestLogger_IncludesToolFields
+- TestLogger_ErrorLevel
 
 Commit:
-- feat(toolobserve): add logging
+- feat(toolobserve): add structured logger
 
 ---
 
 ## Task 5 — Middleware
 
 Tests:
-- Middleware wraps execution and records telemetry
+- TestMiddleware_SuccessPath
+- TestMiddleware_ErrorPath
+- TestMiddleware_DoesNotMutateInput
 
 Commit:
-- feat(toolobserve): add middleware
+- feat(toolobserve): add execution middleware
 
 ---
 
 ## Task 6 — Exporters
 
 Tests:
-- Invalid exporter config yields error
-- Valid exporter config initializes
+- TestExporter_InvalidName
+- TestExporter_Stdout
+- TestExporter_OtlpConfigValidation
+- TestExporter_PrometheusConfigValidation
 
 Commit:
-- feat(toolobserve): add exporter setup
+- feat(toolobserve): add exporter configuration
 
 ---
 
@@ -134,7 +138,7 @@ Commit:
 ## Stack Integration
 
 1. Add ai-tools-stack component docs + D2 diagram
-2. Add mkdocs import for toolobserve repo
+2. Add mkdocs multirepo import
 3. After first release, update version matrix
 
 ---
@@ -142,12 +146,12 @@ Commit:
 ## Commit Order
 
 1. chore(toolobserve): scaffold module and docs
-2. feat(toolobserve): add observer core
+2. feat(toolobserve): add config validation and observer core
 3. feat(toolobserve): add tracing
 4. feat(toolobserve): add metrics
-5. feat(toolobserve): add logging
-6. feat(toolobserve): add middleware
-7. feat(toolobserve): add exporter setup
+5. feat(toolobserve): add structured logger
+6. feat(toolobserve): add execution middleware
+7. feat(toolobserve): add exporter configuration
 8. docs(toolobserve): finalize documentation
 9. docs(ai-tools-stack): add toolobserve component docs
 10. chore(ai-tools-stack): add toolobserve to version matrix (after release)
