@@ -136,6 +136,13 @@ type Field struct {
 }
 ```
 
+### Interface Contracts
+
+- **Observer**: thread-safe; `Shutdown` honors context and is idempotent.
+- **Tracer**: thread-safe; `StartSpan` honors context; `EndSpan` is best-effort.
+- **Metrics**: thread-safe; `RecordExecution` is best-effort and must not panic.
+- **Logger**: thread-safe; logging is best-effort and must not panic; `WithTool` returns a non-nil logger.
+
 ## Usage Examples
 
 ### Basic Setup

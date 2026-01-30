@@ -103,6 +103,11 @@ func (c *Config) Validate() error {
 }
 
 // Observer provides access to telemetry primitives.
+//
+// Contract:
+// - Concurrency: implementations must be safe for concurrent use.
+// - Context: Shutdown must honor cancellation/deadlines.
+// - Errors: Shutdown should be idempotent and return the first error encountered.
 type Observer interface {
 	// Tracer returns the configured tracer.
 	Tracer() trace.Tracer
@@ -118,6 +123,11 @@ type Observer interface {
 }
 
 // Logger is a minimal structured logging interface.
+//
+// Contract:
+// - Concurrency: implementations must be safe for concurrent use.
+// - Context: methods should honor cancellation/deadlines where applicable.
+// - Errors: logging must be best-effort and must not panic.
 type Logger interface {
 	Info(ctx context.Context, msg string, fields ...Field)
 	Warn(ctx context.Context, msg string, fields ...Field)

@@ -41,6 +41,11 @@ func (m ToolMeta) ToolID() string {
 }
 
 // Tracer wraps OpenTelemetry tracing with tool-specific span management.
+//
+// Contract:
+// - Concurrency: implementations must be safe for concurrent use.
+// - Context: StartSpan must honor cancellation/deadlines and return ctx.Err() when canceled.
+// - Errors: EndSpan must be best-effort and must not panic.
 type Tracer interface {
 	// StartSpan starts a new span for tool execution.
 	StartSpan(ctx context.Context, meta ToolMeta) (context.Context, trace.Span)

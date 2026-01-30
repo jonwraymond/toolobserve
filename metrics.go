@@ -9,6 +9,11 @@ import (
 )
 
 // Metrics records execution metrics for tools.
+//
+// Contract:
+// - Concurrency: implementations must be safe for concurrent use.
+// - Context: must honor cancellation/deadlines and return quickly.
+// - Errors: implementations must not panic.
 type Metrics interface {
 	// RecordExecution records a tool execution with duration and error status.
 	RecordExecution(ctx context.Context, meta ToolMeta, duration time.Duration, err error)
