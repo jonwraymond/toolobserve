@@ -125,6 +125,7 @@ type Logger interface {
 	Warn(ctx context.Context, msg string, fields ...Field)
 	Error(ctx context.Context, msg string, fields ...Field)
 	Debug(ctx context.Context, msg string, fields ...Field)
+	WithTool(meta ToolMeta) Logger
 }
 
 // Field represents a structured log field.
@@ -317,6 +318,7 @@ func (l *noopLogger) Info(ctx context.Context, msg string, fields ...Field)  {}
 func (l *noopLogger) Warn(ctx context.Context, msg string, fields ...Field)  {}
 func (l *noopLogger) Error(ctx context.Context, msg string, fields ...Field) {}
 func (l *noopLogger) Debug(ctx context.Context, msg string, fields ...Field) {}
+func (l *noopLogger) WithTool(meta ToolMeta) Logger                          { return l }
 
 // newLogger creates a new logger with the given level.
 // Full implementation will be added in Task 4.
@@ -333,3 +335,4 @@ func (l *basicLogger) Info(ctx context.Context, msg string, fields ...Field)  {}
 func (l *basicLogger) Warn(ctx context.Context, msg string, fields ...Field)  {}
 func (l *basicLogger) Error(ctx context.Context, msg string, fields ...Field) {}
 func (l *basicLogger) Debug(ctx context.Context, msg string, fields ...Field) {}
+func (l *basicLogger) WithTool(meta ToolMeta) Logger                          { return l }
