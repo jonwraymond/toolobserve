@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
@@ -63,8 +64,6 @@ func NewMetricsReader(ctx context.Context, name string) (sdkmetric.Reader, error
 		return sdkmetric.NewPeriodicReader(exp), nil
 
 	case "otlp":
-		// OTLP metrics requires separate setup, for now return error
-		// Full implementation would use otlpmetricgrpc
 		endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 		if endpoint == "" {
 			endpoint = os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
@@ -72,11 +71,9 @@ func NewMetricsReader(ctx context.Context, name string) (sdkmetric.Reader, error
 		if endpoint == "" {
 			return nil, fmt.Errorf("OTLP metrics endpoint not configured: set OTEL_EXPORTER_OTLP_ENDPOINT or OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
 		}
-		// For now, fall back to stdout with discard for OTLP metrics
-		// Full implementation would use otlpmetricgrpc.New(ctx)
-		exp, err := stdoutmetric.New(stdoutmetric.WithWriter(io.Discard))
+		exp, err := otlpmetricgrpc.New(ctx)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to create OTLP metrics exporter: %w", err)
 		}
 		return sdkmetric.NewPeriodicReader(exp), nil
 

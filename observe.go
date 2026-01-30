@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 
+	"github.com/jonwraymond/toolobserve/exporters"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
-	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/noop"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -188,7 +186,7 @@ func NewObserver(ctx context.Context, cfg Config) (Observer, error) {
 
 	// Set up logging
 	if cfg.Logging.Enabled {
-		obs.logger = newLogger(cfg.Logging.Level)
+		obs.logger = NewLogger(cfg.Logging.Level)
 	} else {
 		obs.logger = &noopLogger{}
 	}
@@ -197,21 +195,7 @@ func NewObserver(ctx context.Context, cfg Config) (Observer, error) {
 }
 
 func setupTracing(ctx context.Context, cfg Config, res *resource.Resource) (*sdktrace.TracerProvider, trace.Tracer, error) {
-	var exporter sdktrace.SpanExporter
-	var err error
-
-	switch cfg.Tracing.Exporter {
-	case "stdout":
-		exporter, err = stdouttrace.New(stdouttrace.WithWriter(io.Discard))
-	case "none", "":
-		// No-op exporter - use nil
-		exporter = nil
-	default:
-		// For now, fall back to stdout for unsupported exporters
-		// Full exporter support will be added in Task 6
-		exporter, err = stdouttrace.New(stdouttrace.WithWriter(io.Discard))
-	}
-
+	exporter, err := exporters.NewTracingExporter(ctx, cfg.Tracing.Exporter)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create trace exporter: %w", err)
 	}
@@ -242,26 +226,9 @@ func setupTracing(ctx context.Context, cfg Config, res *resource.Resource) (*sdk
 }
 
 func setupMetrics(ctx context.Context, cfg Config, res *resource.Resource) (*sdkmetric.MeterProvider, metric.Meter, error) {
-	var reader sdkmetric.Reader
-
-	switch cfg.Metrics.Exporter {
-	case "stdout":
-		exporter, exporterErr := stdoutmetric.New(stdoutmetric.WithWriter(io.Discard))
-		if exporterErr != nil {
-			return nil, nil, fmt.Errorf("failed to create metrics exporter: %w", exporterErr)
-		}
-		reader = sdkmetric.NewPeriodicReader(exporter)
-	case "none", "":
-		// No reader for no-op
-		reader = nil
-	default:
-		// For now, fall back to stdout for unsupported exporters
-		// Full exporter support will be added in Task 6
-		exporter, exporterErr := stdoutmetric.New(stdoutmetric.WithWriter(io.Discard))
-		if exporterErr != nil {
-			return nil, nil, fmt.Errorf("failed to create metrics exporter: %w", exporterErr)
-		}
-		reader = sdkmetric.NewPeriodicReader(exporter)
+	reader, err := exporters.NewMetricsReader(ctx, cfg.Metrics.Exporter)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create metrics reader: %w", err)
 	}
 
 	opts := []sdkmetric.Option{
@@ -319,20 +286,3 @@ func (l *noopLogger) Warn(ctx context.Context, msg string, fields ...Field)  {}
 func (l *noopLogger) Error(ctx context.Context, msg string, fields ...Field) {}
 func (l *noopLogger) Debug(ctx context.Context, msg string, fields ...Field) {}
 func (l *noopLogger) WithTool(meta ToolMeta) Logger                          { return l }
-
-// newLogger creates a new logger with the given level.
-// Full implementation will be added in Task 4.
-func newLogger(level string) Logger {
-	return &basicLogger{level: level}
-}
-
-// basicLogger is a minimal logger implementation.
-type basicLogger struct {
-	level string
-}
-
-func (l *basicLogger) Info(ctx context.Context, msg string, fields ...Field)  {}
-func (l *basicLogger) Warn(ctx context.Context, msg string, fields ...Field)  {}
-func (l *basicLogger) Error(ctx context.Context, msg string, fields ...Field) {}
-func (l *basicLogger) Debug(ctx context.Context, msg string, fields ...Field) {}
-func (l *basicLogger) WithTool(meta ToolMeta) Logger                          { return l }
